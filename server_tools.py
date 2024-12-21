@@ -180,11 +180,11 @@ def download(url, password, text_widget):
 
     if not password:
         params = {
-            "command": f"mega-get {url}"
+            "command": f"mega-get {url} E:\\media"
         }
     else:
         params = {
-            "command": f'mega-get --password="{password}" {url}'
+            "command": f'mega-get --password="{password}" {url} E:\\media'
         }
 
     url = f'http://markrainey.me/command'
