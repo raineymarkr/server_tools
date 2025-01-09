@@ -274,7 +274,7 @@ def list_media_folder(window, directory):
     }
 
     params = {
-        "command": f"dir {directory}"
+        "command": f'dir {directory}'
     }
 
     url = 'http://markrainey.me/command'
@@ -339,21 +339,21 @@ def show_media_window():
 
             try:
                 if "<DIR>" in line:
-                    date, time, _dir, name = line.split(maxsplit=3)
+                    date, time, time2, _dir, name = line.split(maxsplit=4)
                     directories.append((name, "dir", date, time))
                 else:
-                    date, time, size, name = line.split(maxsplit=3)
+                    date, time, time2, size, name = line.split(maxsplit=4)
                     files.append((name, size, date, time))
             except ValueError:
                 continue
 
         # Insert directories first
         for name, size, date, time in directories:
-            tree.insert("", tk.END, values=(name, size, date, time))
+            tree.insert("", tk.END, values=(name, size, date, time+ " " + time2))
 
         # Insert files next
         for name, size, date, time in files:
-            tree.insert("", tk.END, values=(name, size, date, time))
+            tree.insert("", tk.END, values=(name, size, date, time+ " " + time2))
 
     populate_tree(lines)
 
@@ -366,7 +366,7 @@ def show_media_window():
         if not values:
             return
 
-        name = values[0][5:].strip()
+        name = values[0].strip()
         print(values)
         if name == "..":
             new_directory = "\\".join(current_directory.split("\\")[:-1])
