@@ -6,6 +6,8 @@ import sqlite3
 import threading
 import subprocess
 import os
+import asyncio
+import aiohttp
 
 main = ttk.Window(themename='yeti')
 main.title("markrainey.me Server Tools")
@@ -140,7 +142,13 @@ def logout(widget):
             updateButtons()
             widget.config(text="Logged Out")
         else:
-            widget.config(text="Logout Failed")
+            conn = sqlite3.connect(DATABASE_FILE)
+            c = conn.cursor()
+            c.execute("UPDATE Settings SET Key = ?", ("",))
+            conn.commit()
+            conn.close()
+            updateButtons()
+            widget.config(text="Logout Failed / Cleared Database.")
     except requests.exceptions.RequestException as e:
         widget.config(text=f"Logout Failed: {str(e)}")
         return False
@@ -180,18 +188,18 @@ def download(url, password, text_widget):
 
     if not password:
         params = {
-            "command": f"mega-get {url}"
+            "command": f"mega-get {url} E:\media"
         }
     else:
         params = {
-            "command": f'mega-get --password="{password}" {url}'
+            "command": f'mega-get --password="{password}" {url} E:\media'
         }
 
     url = f'http://markrainey.me/command'
 
     try:
         # Send POST request
-        response = requests.post(url, headers=headers, json=params, stream=True)
+        response = requests.post(url, headers=headers, json=params)
 
         if response.status_code == 200:
             # Stream and display output
@@ -201,6 +209,16 @@ def download(url, password, text_widget):
                     decoded_line = chunk.decode('utf-8')
                     text_widget.insert(tk.END, decoded_line + '\n')
                     text_widget.see(tk.END)  # Auto-scroll
+            print('ding')
+        elif response.status_code == 401:
+            conn = sqlite3.connect(DATABASE_FILE)
+            c = conn.cursor()
+            c.execute("UPDATE Settings SET Key = ?", ("",))
+            conn.commit()
+            conn.close()
+            updateButtons()
+            text_widget.insert(tk.END, "Download Failed: Unauthorized\n Cleared Database\n Please Log In Again \n")
+            text_widget.see(tk.END)            
         else:
             text_widget.insert(tk.END, f"Download Failed: {response.status_code}\n")
             text_widget.see(tk.END)
@@ -210,6 +228,7 @@ def download(url, password, text_widget):
         text_widget.see(tk.END)
 
 def start_download(url, password, text_widget):
+    print("started download")
     # Use a thread to avoid blocking the main UI
     threading.Thread(target=download, args=(url, password, text_widget), daemon=True).start()
     
@@ -236,7 +255,7 @@ def open_download_window():
     )
     download_button.pack(padx=10, pady=10)
 
-def list_media_folder():
+def list_media_folder(window, directory):
     # Fetch API Key from DATABASE_FILE
     conn = sqlite3.connect(DATABASE_FILE)
     c = conn.cursor()
@@ -255,7 +274,7 @@ def list_media_folder():
     }
 
     params = {
-        "command": "dir E:\media"
+        "command": f"dir {directory}"
     }
 
     url = 'http://markrainey.me/command'
@@ -270,10 +289,21 @@ def list_media_folder():
                 return response_data.strip().splitlines()
             except requests.exceptions.JSONDecodeError:
                 return [f"Error: Invalid JSON Response from Server - {response.text}"]
+        elif response.status_code == 401:
+            conn = sqlite3.connect(DATABASE_FILE)
+            c = conn.cursor()
+            c.execute("UPDATE Settings SET Key = ?", ("",))
+            conn.commit()
+            conn.close()
+            updateButtons()
+            window.destroy()
         else:
             return [f"Error: {response.status_code} - {response.text}"]
     except requests.exceptions.RequestException as e:
         return [f"Error: {str(e)}"]
+
+
+
 
 def show_media_window():
     media_window = tk.Toplevel()
@@ -293,22 +323,72 @@ def show_media_window():
     tree.column("Date", width=100)
     tree.column("Time", width=100)
 
-    lines = list_media_folder()
+    # Initialize current directory
+    current_directory = "E:\\media"
+    lines = list_media_folder(media_window, current_directory)
 
-    for line in lines:
-        if not line.strip() or "Directory of" in line or "bytes free" in line or "E is SSD" in line or "is 1CE8-06DD" in line:
-            continue
+    def populate_tree(lines):
+        tree.delete(*tree.get_children())
 
-        try:
-            if "<DIR>" in line:
-                date, time, _dir, name = line.split(maxsplit=3)
-                size = "DIR"
-            else:
-                date, time, size, name = line.split(maxsplit=3)
-        except ValueError:
-            continue
+        directories = []
+        files = []
 
-        tree.insert("", tk.END, values=(name, size, date, time))
+        for line in lines:
+            if not line.strip() or "Directory of" in line or "bytes free" in line or "E is SSD" in line or "is 1CE8-06DD" in line:
+                continue
+
+            try:
+                if "<DIR>" in line:
+                    date, time, _dir, name = line.split(maxsplit=3)
+                    directories.append((name, "dir", date, time))
+                else:
+                    date, time, size, name = line.split(maxsplit=3)
+                    files.append((name, size, date, time))
+            except ValueError:
+                continue
+
+        # Insert directories first
+        for name, size, date, time in directories:
+            tree.insert("", tk.END, values=(name, size, date, time))
+
+        # Insert files next
+        for name, size, date, time in files:
+            tree.insert("", tk.END, values=(name, size, date, time))
+
+    populate_tree(lines)
+
+    def onDoubleClick(event):
+        nonlocal current_directory
+
+        item = tree.item(tree.selection())
+        values = item['values']
+
+        if not values:
+            return
+
+        name = values[0][5:].strip()
+        print(values)
+        if name == "..":
+            new_directory = "\\".join(current_directory.split("\\")[:-1])
+            if not new_directory or new_directory == "E:":
+                new_directory = "E:\\"
+        elif values[1] == "DIR".lower():
+            new_directory = f"{current_directory}\\{name}"
+            print(new_directory)
+        else:
+            return  # Not a directory, do nothing
+
+        # Fetch the new directory contents
+        new_lines = list_media_folder(media_window, f'"{new_directory}"')
+        if new_directory == "E:\\":
+            current_directory = "E:"
+        else:
+            current_directory = new_directory
+
+        # Repopulate tree with new directory contents
+        populate_tree(new_lines)
+
+    tree.bind("<Double-1>", onDoubleClick)
 
     scrollbar = ttk.Scrollbar(media_window, orient=tk.VERTICAL, command=tree.yview)
     tree.configure(yscrollcommand=scrollbar.set)
