@@ -357,6 +357,65 @@ def show_media_window():
 
     populate_tree(lines)
 
+    def onDelete(event):
+        item = tree.selection()
+        if not item:
+            return  # No item selected
+
+        item_values = tree.item(item, "values")
+        if not item_values:
+            return  # No valid data in the selection
+
+        name = item_values[0].strip()
+        item_type = item_values[1].strip().lower()
+
+        if name in [".", ".."]:
+            return  # Skip parent/current directory references
+
+        # Construct the path safely
+        target_path = os.path.join(current_directory, name)
+
+        # Fetch API key once and reuse it
+        try:
+            conn = sqlite3.connect(DATABASE_FILE)
+            c = conn.cursor()
+            c.execute("SELECT Key FROM Settings")
+            data = c.fetchone()
+            conn.close()
+            if not data or not data[0]:
+                raise ValueError("API key missing or not logged in.")
+            key = data[0]
+        except Exception as e:
+            tk.messagebox.showerror("Error", f"Failed to fetch API key: {e}")
+            return
+
+        headers = {
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        }
+
+        # Prepare command based on item type
+        if item_type == "dir":
+            command = f"rmdir /s /q \"{target_path}\""
+        else:
+            command = f"del /f \"{target_path}\""
+
+        params = {"command": command}
+        url = "http://markrainey.me/command"
+
+        try:
+            response = requests.post(url, headers=headers, json=params)
+            if response.status_code == 200:
+                # Refresh the tree view
+                new_lines = list_media_folder(media_window, current_directory)
+                populate_tree(new_lines)
+            else:
+                tk.messagebox.showerror("Error", f"Failed to delete: {response.text}")
+        except requests.RequestException as e:
+            tk.messagebox.showerror("Error", f"Network error: {e}")
+
+
+
     def onDoubleClick(event):
         nonlocal current_directory
 
@@ -389,7 +448,7 @@ def show_media_window():
         populate_tree(new_lines)
 
     tree.bind("<Double-1>", onDoubleClick)
-
+    tree.bind('<Delete>', onDelete)
     scrollbar = ttk.Scrollbar(media_window, orient=tk.VERTICAL, command=tree.yview)
     tree.configure(yscrollcommand=scrollbar.set)
     scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
